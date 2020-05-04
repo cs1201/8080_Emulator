@@ -26,19 +26,28 @@ int main(int argc, char **argv){
     char *rom_filename = *(argv+1);
     printf("Loading ROM File: %s\n", rom_filename);
 
-    if(load_rom(cpu, rom_filename) != I8080_OK){
-        fprintf(stderr, "[ERROR]: did not load ROM\n");
-        return 1;
-    }
+    // if(load_rom(cpu, rom_filename) != I8080_OK){
+    //     fprintf(stderr, "[ERROR]: did not load ROM\n");
+    //     return 1;
+    // }
 
     cpu->pc = 0;
+    cpu->flags.c = 0;
+    cpu->flags.ac = 0;
+    cpu->flags.z = 0;
+    cpu->flags.s = 0;
+    cpu->flags.p = 0;
 
-    //TEST RUN
-    while(cpu->pc < cpu->loaded_rom_size){
-        run_instruction(cpu);
-    }
-    run_instruction(cpu);
+    // //TEST RUN
+    // while(cpu->pc < cpu->loaded_rom_size){
+    //     run_instruction(cpu);
+    // }
+    // run_instruction(cpu);
 
+    // test_inr(cpu);
+    // test_dcr(cpu);
+    // test_mvi(cpu);
+    test_ldax(cpu);
 
     if (cpu)
         free(cpu);
@@ -46,13 +55,92 @@ int main(int argc, char **argv){
     return 0;
 }
 
-void check_flags(i8080_state_t *cpu, uint16_t result, uint8_t flag_mask){
-    if (flag_mask & FLAG_Z)
-        cpu->flags.z = ((answer & 0xff) == 0); //Zero flag
-    if (flag & FLAG_C)
-        cpu->flags.c = (answer >> 0xff);
-    if (flag & FLAG_S)
-        cpu->flags.s = ((answer & 0x80) != 0);
+void display_flags(i8080_state_t *cpu){
+    printf("C:  %d\n", cpu->flags.c);
+    printf("AC: %d\n", cpu->flags.ac);
+    printf("S:  %d\n", cpu->flags.s);
+    printf("P:  %d\n", cpu->flags.p);
+    printf("Z:  %d\n", cpu->flags.z);
+}
+
+void check_flags(i8080_state_t *cpu, uint16_t result, uint8_t mask){
+    if (mask & FLAG_Z)
+        cpu->flags.z = ((result & 0xff) == 0); //Zero flag
+    if (mask & FLAG_C)
+        cpu->flags.c = (result > 0xff); //Carry flag
+    if (mask & FLAG_AC)
+        cpu->flags.ac = (result & (1<<3)) != 0; //Check state of 4th bit
+    if (mask & FLAG_S) //Sign
+        cpu->flags.s = ((result & 0x80) != 0); //Check HSB
+    if (mask & FLAG_P){ //Parity: 1=even, 0=odd
+        uint16_t x = result & 0xff;
+        x ^= x >> 4;
+        x ^= x >> 2;
+        x ^= x >> 1;
+        cpu->flags.p = ~(x & 1);
+    }
+}
+
+/* Increase value in register */
+void inr(i8080_state_t *cpu, uint8_t *reg){
+    uint16_t result = *reg + 1;
+    check_flags(cpu, result, FLAG_Z|FLAG_S|FLAG_P|FLAG_AC);
+    *reg = result & 0xff;
+}
+
+/* Decrease value in register */
+void dcr(i8080_state_t *cpu, uint8_t *reg){
+    uint16_t result = *reg - 1;
+    check_flags(cpu, result, FLAG_Z|FLAG_S|FLAG_P|FLAG_AC);
+    *reg = result & 0xff;
+}
+
+/* Move a given value into a register */
+void mvi(uint8_t *reg, uint8_t value){
+    *reg = value;
+}
+
+/* LDAX [reg], mem[addr] -- Load data from memory address into a register */
+void ldax(i8080_state_t *cpu, uint8_t *reg, uint16_t addr){
+    if(addr <= I8080_MAX_ADDRESS){
+        *reg = cpu->memory[addr];
+    }else{
+        fprintf(stderr, "Address exceeds CPU memory\n");
+    }
+}
+
+/* STAX [addr]. Store accumulator in address from register pair */
+void stax(i8080_state_t *cpu, uint16_t addr){
+    cpu->memory[addr] = cpu->a;
+}
+
+void test_ldax(i8080_state_t *cpu){
+    cpu->b = 0x00;
+    cpu->memory[0xffff] = 0x34;
+    ldax(cpu, &cpu->b, 0xffff);
+    printf("Reg = %02X\n", cpu->b);
+}
+
+void test_mvi(i8080_state_t *cpu){
+    uint8_t val = 0xf0;
+    cpu->c = 0x00;
+    mvi(&cpu->b, val);
+    printf("Result: %02X\n", cpu->b);
+}
+
+void test_inr(i8080_state_t *cpu){
+    cpu->c = 0xaa;
+    // inr(cpu);
+    printf("Result: c=0x%02x\n", cpu->c);
+    display_flags(cpu);
+}
+
+void test_dcr(i8080_state_t *cpu){
+    uint8_t val = 0x01;
+    cpu->c = val;
+    dcr(cpu, &cpu->c);
+    printf("Orig: %02X, Result: %02X\n", val, cpu->c);
+    display_flags(cpu);
 }
 
 int run_instruction(i8080_state_t *cpu){
@@ -61,40 +149,79 @@ int run_instruction(i8080_state_t *cpu){
     unsigned char d16_l = cpu->memory[cpu->pc + 1];
     unsigned char d16_h = cpu->memory[cpu->pc + 2];
     uint16_t sum = 0;
+    uint8_t pc_inc = 1; //Amount to increase program_counter - this is mostly 1, so set default here
     switch(*op){
         case 0x00: break; //NOP
         case 0x01: //LXI BC,D16
             cpu->b = d16_h;
             cpu->c = d16_l;
-            cpu->pc += 3;
+            pc_inc = 3;
             printf("0x%04X written to BC\n", (cpu->b<<8 | cpu->c));
             break;
         case 0x02: //STAX BC
             cpu->memory[(cpu->b <<8) | cpu->c] = cpu->a;
-            cpu->pc++;
             break;
         case 0x03: //INX BC
             sum = ( (cpu->b << 8) | cpu->c ) + 1;
             cpu->b = sum >> 8;
             cpu->c = sum & 0xffff;
-            printf("Increment BC by 1 to 0x%04X\n", sum);
-            cpu->pc++;
             break;
-        case 0x04:
-        case 0x05:
-        case 0x06:
-        case 0x07:
-        case 0x08:
-        case 0x09:
-        case 0x0A:
-        case 0x0B:
-        case 0x0C:
-        case 0x0D:
-        case 0x0E:
-        case 0x0F:
-        case 0x10:
-        case 0x11:
-        case 0x12:
+        case 0x04: //INR B
+            inr(cpu, &(cpu->b));
+            break;
+        case 0x05: //DCR B
+            dcr(cpu, &(cpu->b));
+            break;
+        case 0x06: //MVI B
+            mvi(&(cpu->b), d16_l);
+            pc_inc = 2;
+            break;
+        case 0x07: //RLC - Rotate accumulator left
+            cpu->flags.c = cpu->a & 0x40;
+            cpu->a = ((cpu->a << 1) | (cpu->a >> 7)) & 0xff;
+            break;
+        case 0x08: break; //NOP
+        case 0x09: //DAD BC (Add BC reg to HL reg)
+            {
+                uint16_t result = ((cpu->h << 8) | cpu->l) + ((cpu->b << 8) | cpu->c);
+                check_flags(cpu, result, FLAG_C);
+                cpu->h = ((result>>8) & 0xff);
+                cpu->l = (result & 0xff);
+            }
+        case 0x0A: //LDAX BC (Load BC into A)
+            cpu->a = cpu->memory[(cpu->b << 8) & cpu->c];
+            break;
+        case 0x0B: //DCX BC
+            {
+                uint16_t result = (((cpu->b << 8) | cpu->c) -1);
+                cpu->b = (result >>8) & 0xff;
+                cpu->c = result & 0xff;
+                break;
+            }
+        case 0x0C: //INR C
+            inr(cpu, &(cpu->c));
+            break;
+        case 0x0D: //DCR C
+            dcr(cpu, &(cpu->c));
+            break;
+        case 0x0E: //MVI C,D8 (Move 8-bit value into C)
+            mvi(&(cpu->c), d16_l);
+            pc_inc = 2;
+            break;
+        case 0x0F: //RRC (Rotate accumulator right)
+            cpu->flags.c = cpu->a & 0x1; //Carry bit = current Abit0
+            cpu->a = ((cpu->a >> 1) | (cpu->a << 7)) & 0xff;
+            break;
+        case 0x10: //NOP
+            break;
+        case 0x11: //LXI D, D16 (Load value in DE)
+            cpu->d = d16_h;
+            cpu->e = d16_l;
+            pc_inc = 3;
+            break;
+        case 0x12: //STAX D (Load A into memory addressed by DE)
+            stax(cpu, ((cpu->d << 8) | cpu->e));
+            break;
         case 0x13:
         case 0x14:
         case 0x15:
@@ -332,8 +459,11 @@ int run_instruction(i8080_state_t *cpu){
         case 0xFD:
         case 0xFE:
         case 0xFF:
-        default: cpu->pc++; break;
+        default: break;
     }
+
+    //Increment Program Counter
+    cpu->pc += pc_inc;
 
     return I8080_OK;
 }
@@ -358,8 +488,8 @@ int load_rom(i8080_state_t *cpu, char *rom_filename){
     }
     printf("ROM Size: %d\n", rom_size);
     cpu->loaded_rom_size = rom_size;
-
-    if(fread(cpu->memory, sizeof(uint8_t), rom_size, rom_file) != rom_size){
+    int read_bytes = fread(cpu->memory, sizeof(uint8_t), rom_size, rom_file);
+    if( read_bytes != rom_size){
         return I8080_ERROR;
     }
 

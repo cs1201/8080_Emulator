@@ -2,19 +2,19 @@
 #define INTEL8080_H
 
 #define I8080_ADDRESS_BUS_SIZE (16)
-#define I8080_MAX_ADDRESS (65536)
+#define I8080_MAX_ADDRESS (0xFFFF)
 #define I8080_MAX_MEMORY_SIZE (I8080_MAX_ADDRESS) 
 
 #define I8080_OK (0)
 #define I8080_ERROR (1)
 
 enum{
-    FLAG_C = 1;
-    FLAG_AC = 2;
-    FLAG_S = 4;
-    FLAG_P = 8;
-    FLAG_Z = 16;
-}
+    FLAG_C =  0x1,
+    FLAG_AC = 0x2,
+    FLAG_S =  0x4,
+    FLAG_P =  0x8,
+    FLAG_Z =  0x10,
+};
 
 /* Bitfield struct to represent CPU condition bits */
 typedef struct i8080_flags_t{
@@ -54,5 +54,14 @@ typedef struct i8080_state_t{
 // System Function Prototypes
 int load_rom(i8080_state_t *cpu, char *rom_filename);
 int run_instruction(i8080_state_t *cpu);
-
+void check_flags(i8080_state_t *cpu, uint16_t result, uint8_t mask);
+void display_flags(i8080_state_t *cpu);
+void test_inr(i8080_state_t *cpu);
+void test_dcr(i8080_state_t *cpu);
+void test_mvi(i8080_state_t *cpu);
+void test_ldax(i8080_state_t *cpu);
+void inr(i8080_state_t *cpu, uint8_t *reg);
+void dcr(i8080_state_t *cpu, uint8_t *reg);
+void mvi(uint8_t *reg, uint8_t value);
+void ldax(i8080_state_t *cpu, uint8_t *reg, uint16_t addr);
 #endif
