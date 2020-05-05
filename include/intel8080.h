@@ -51,17 +51,35 @@ typedef struct i8080_state_t{
 //     unsigned char *data;
 // }i8080_rom_t;
 
-// System Function Prototypes
+/* System Function Prototypes */ 
 int load_rom(i8080_state_t *cpu, char *rom_filename);
 int run_instruction(i8080_state_t *cpu);
 void check_flags(i8080_state_t *cpu, uint16_t result, uint8_t mask);
 void display_flags(i8080_state_t *cpu);
+void clear_flags(i8080_state_t *cpu);
+
+/* Generic CPU Instruction helper functions */
+void inr(i8080_state_t *cpu, uint8_t *reg);
+void inx(uint8_t *reg_hi, uint8_t *reg_lo);
+void dcr(i8080_state_t *cpu, uint8_t *reg);
+void dcx(uint8_t *reg_hi, uint8_t *reg_lo);
+void mvi(uint8_t *reg, uint8_t value);
+void ldax(i8080_state_t *cpu, uint8_t *reg, uint16_t addr);
+void add(i8080_state_t *cpu, uint8_t *reg);
+void adc(i8080_state_t *cpu, uint8_t *reg);
+void sub(i8080_state_t *cpu, uint8_t *reg);
+void sbb(i8080_state_t *cpu, uint8_t *reg);
+void ana(i8080_state_t *cpu, uint8_t *reg);
+void xra(i8080_state_t *cpu, uint8_t *reg);
+void ora(i8080_state_t *cpu, uint8_t *reg)
+
+void not_implemented(uint8_t op);
+
+/* Test Functions */
 void test_inr(i8080_state_t *cpu);
 void test_dcr(i8080_state_t *cpu);
 void test_mvi(i8080_state_t *cpu);
 void test_ldax(i8080_state_t *cpu);
-void inr(i8080_state_t *cpu, uint8_t *reg);
-void dcr(i8080_state_t *cpu, uint8_t *reg);
-void mvi(uint8_t *reg, uint8_t value);
-void ldax(i8080_state_t *cpu, uint8_t *reg, uint16_t addr);
+// Todo: TEST DAD
+
 #endif
