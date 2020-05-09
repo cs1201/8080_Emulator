@@ -183,6 +183,49 @@ void ora(i8080_state_t *cpu, uint8_t *reg){
     check_flags(cpu, (uint16_t)cpu->a, FLAG_S|FLAG_Z|FLAG_P|FLAG_C);
 }
 
+/* CMP [reg] - Set Z flag = 1 if [reg] == A, else set Z=0 */
+void cmp(i8080_state_t *cpu, uint8_t *reg){
+    uint16_t result = cpu->a - *reg;
+    check_flags(cpu, result, FLAG_Z|FLAG_S|FLAG_P|FLAG_AC|FLAG_C);
+    cpu->flags.z = (cpu->a == *reg) ? 1 : 0;
+}
+
+/* RET - Replace program-counter by value addressed by stack pointer */
+void ret(i8080_state_t *cpu){
+    // PC.lo <- (sp); PC.hi<-(sp+1); SP <- SP+2
+    uint8_t d16_l = cpu->memory[cpu->sp];
+    uint8_t d16_h = cpu->memory[cpu->sp+1];
+    cpu->pc = MERGE_16BIT(d16_h, d16_l);
+    cpu->sp += 2;
+}
+
+/* POP - Replace value in register pair with that help at data addressed by stack pointer */
+void pop(i8080_state_t *cpu, uint8_t *reg_hi, uint8_t *reg_lo){
+    *reg_hi = cpu->memory[cpu->sp+1];
+    *reg_lo = cpu->memory[cpu->sp];
+    cpu->sp += 2;
+}
+
+/* JMP - Program counter is moved to address given */
+void jmp(i8080_state_t *cpu, uint16_t addr){
+    cpu->pc = addr;
+}
+
+/* CALL - Push Return pos onto stack. Move PC to target address */
+void call(i8080_state_t *cpu, uint16_t addr){
+    uint16_t ret = cpu->pc + 2; //We want to return to just after this instruction
+    cpu->memory[cpu->sp - 1] = ret & 0xff; // Push current position onto the stack
+    cpu->memory[cpu->sp - 2] = (ret >> 8) & 0xff;
+    cpu->sp -= 2; // Reset stack pointer to the address we just pushed
+    cpu->pc = addr; // Move PC to target
+}
+
+/* PUSH - Push register pair data onto stack */
+void push(i8080_state_t *cpu, uint8_t *reg_hi, uint8_t *reg_lo){
+    cpu->memory[cpu->sp - 2] = *reg_lo;
+    cpu->memory[cpu->sp - 1] = *reg_hi;
+    cpu->sp -= 2;
+}
 
 void test_ldax(i8080_state_t *cpu){
     cpu->b = 0x00;
@@ -215,17 +258,17 @@ void test_dcr(i8080_state_t *cpu){
 
 int run_instruction(i8080_state_t *cpu){
     unsigned char *op = &cpu->memory[cpu->pc]; // Get op-code at program counter position
-    //Pre-fetch high and low operands in case we need them
     unsigned char d16_l = cpu->memory[cpu->pc + 1];
     unsigned char d16_h = cpu->memory[cpu->pc + 2];
-    uint16_t sum = 0;
-    uint8_t pc_inc = 1; //Amount to increase program_counter - this is mostly 1, so set default here
+    cpu->pc++; //Increment Program Counter - some instructions will apply extra increments to PC
+
+    //Parse for OP-Code
     switch(*op){
         case 0x00: break; //NOP
         case 0x01: //LXI BC,D16
             cpu->b = d16_h;
             cpu->c = d16_l;
-            pc_inc = 3;
+            cpu->pc += 2;
             printf("0x%04X written to BC\n", (cpu->b<<8 | cpu->c));
             break;
         case 0x02: //STAX BC
@@ -242,7 +285,7 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x06: //MVI B
             mvi(&(cpu->b), d16_l);
-            pc_inc = 2;
+            cpu->pc++;
             break;
         case 0x07: //RLC - Rotate accumulator left
             cpu->flags.c = cpu->a & 0x40;
@@ -270,7 +313,7 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x0E: //MVI C,D8 (Move 8-bit value into C)
             mvi(&(cpu->c), d16_l);
-            pc_inc = 2;
+            cpu->pc++;
             break;
         case 0x0F: //RRC (Rotate accumulator right)
             cpu->flags.c = cpu->a & 0x1; //Carry bit = current A[0]
@@ -281,7 +324,7 @@ int run_instruction(i8080_state_t *cpu){
         case 0x11: //LXI D, D16 (Load value in DE)
             cpu->d = d16_h;
             cpu->e = d16_l;
-            pc_inc = 3;
+            cpu->pc += 2;
             break;
         case 0x12: //STAX D (Load A into memory addressed by DE)
             stax(cpu, ((cpu->d << 8) | cpu->e));
@@ -296,7 +339,7 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x16: //MVI D,D8
             mvi(&(cpu->d), d16_l);
-            pc_inc = 2;
+            cpu->pc++;
             break;
         case 0x17: // RAL (Rotate accumulator Left, through carry)
             {
@@ -328,7 +371,7 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x1E: //MVI E, D8
             mvi((&cpu->e), d16_l);
-            pc_inc = 2;
+            cpu->pc++;
             break;
         case 0x1F: //RAR (Rotate A right through carry)
             not_implemented(*op);
@@ -338,14 +381,14 @@ int run_instruction(i8080_state_t *cpu){
         case 0x21: //LXI H,D16
             cpu->h = d16_h;
             cpu->l = d16_l;
-            pc_inc = 3;
+            cpu->pc += 2;
             break;
         case 0x22: //SHLD addr
             {
                 uint16_t addr = ((d16_h << 8) | d16_l);
                 cpu->memory[addr] = cpu->l;
                 cpu->memory[addr+1] = cpu->h;
-                pc_inc = 3;
+                cpu->pc += 2;
                 break;
             }
         case 0x23: //INX H
@@ -359,7 +402,7 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x26: // MVI H,D8
             mvi(&(cpu->h), d16_l);
-            pc_inc = 2;
+            cpu->pc++;
             break;
         case 0x27: // DAA
             not_implemented(*op);
@@ -379,7 +422,7 @@ int run_instruction(i8080_state_t *cpu){
                 uint16_t addr = MERGE_16BIT(d16_h, d16_l);
                 cpu->l = cpu->memory[addr];
                 cpu->h = cpu->memory[addr+1];
-                pc_inc = 3;
+                cpu->pc += 2;
                 break;
             }
         case 0x2B: // DCH HL
@@ -393,7 +436,7 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x2E: // MVI L, D8
             mvi(&(cpu->l), d16_l);
-            pc_inc = 2;
+            cpu->pc++;
             break;
         case 0x2F: // CMA (A = !A)
             cpu->a = ~(cpu->a) & 0xff;
@@ -402,11 +445,11 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x31: //LXI SP,D16 (update stack pointer)
             cpu->sp = MERGE_16BIT(d16_h, d16_l);
-            pc_inc = 3;
+            cpu->pc += 2;
             break;
         case 0x32: //STA addr
             cpu->memory[MERGE_16BIT(d16_h, d16_l)] = cpu->a;
-            pc_inc = 3;
+            cpu->pc += 2;
             break;
         case 0x33: // INX SP
             cpu->sp += 1;
@@ -419,7 +462,7 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x36: // MVI M,D8 (Move val into memory addresse dy HL)
             cpu->memory[MERGE_16BIT(cpu->h, cpu->l)] = d16_l;
-            pc_inc = 2;
+            cpu->pc++;
             break;
         case 0x37: // STC
             cpu->c = 0x1;
@@ -436,7 +479,7 @@ int run_instruction(i8080_state_t *cpu){
             }
         case 0x3A: // LDA addr
             cpu->a = cpu->memory[MERGE_16BIT(d16_h, d16_l)];
-            pc_inc = 3;
+            cpu->pc += 2;
             break;
         case 0x3B: // DCX SP
             cpu->sp -= 1;
@@ -449,7 +492,7 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x3E: // MVI A,D8
             mvi(&(cpu->a), d16_l);
-            pc_inc = 2;
+            cpu->pc++;
             break;
         case 0x3F: // CMC
             cpu->c = !(cpu->c);
@@ -480,7 +523,7 @@ int run_instruction(i8080_state_t *cpu){
             break;
         case 0x49: // MOV C,C
             break;
-        case 0x4A: // MOV C, D
+        case 0x4A: // MOV C,D
             cpu->c = cpu->d;
             break;
         case 0x4B: // MOV C,E
@@ -646,10 +689,10 @@ int run_instruction(i8080_state_t *cpu){
         case 0x83: // ADD E
             add(cpu, &(cpu->e));
             break;
-        case 0x84:
+        case 0x84: // ADD H
             add(cpu, &(cpu->h));
             break;
-        case 0x85:
+        case 0x85: // ADD L
             add(cpu, &(cpu->l));
             break;
         case 0x86: // ADD M
@@ -780,91 +823,347 @@ int run_instruction(i8080_state_t *cpu){
         case 0xAF: // XRA A
             cpu->flags.c = 0;
             break;
-        case 0xB0:
-        case 0xB1:
-        case 0xB2:
-        case 0xB3:
-        case 0xB4:
-        case 0xB5:
-        case 0xB6:
-        case 0xB7:
-        case 0xB8:
-        case 0xB9:
-        case 0xBA:
-        case 0xBB:
-        case 0xBC:
-        case 0xBD:
-        case 0xBE:
-        case 0xBF:
-        case 0xC0:
-        case 0xC1:
-        case 0xC2:
-        case 0xC3:
-        case 0xC4:
-        case 0xC5:
-        case 0xC6:
-        case 0xC7:
-        case 0xC8:
-        case 0xC9:
-        case 0xCA:
-        case 0xCB:
-        case 0xCC:
-        case 0xCD:
-        case 0xCE:
-        case 0xCF:
-        case 0xD0:
-        case 0xD1:
-        case 0xD2:
-        case 0xD3:
-        case 0xD4:
-        case 0xD5:
-        case 0xD6:
-        case 0xD7:
-        case 0xD8:
-        case 0xD9:
-        case 0xDA:
-        case 0xDB:
-        case 0xDC:
-        case 0xDD:
-        case 0xDE:
-        case 0xDF:
-        case 0xE0:
-        case 0xE1:
-        case 0xE2:
-        case 0xE3:
-        case 0xE4:
-        case 0xE5:
-        case 0xE6:
-        case 0xE7:
-        case 0xE8:
-        case 0xE9:
-        case 0xEA:
-        case 0xEB:
-        case 0xEC:
-        case 0xED:
-        case 0xEE:
-        case 0xEF:
-        case 0xF0:
-        case 0xF1:
-        case 0xF2:
-        case 0xF3:
-        case 0xF4:
-        case 0xF5:
+        case 0xB0: // ORA B
+            ora(cpu, &(cpu->b));
+            break;
+        case 0xB1: // ORA C
+            ora(cpu, &(cpu->c));
+            break;
+        case 0xB2: // ORA D
+            ora(cpu, &(cpu->d));
+            break;
+        case 0xB3: // ORA E
+            ora(cpu, &(cpu->e));
+            break;
+        case 0xB4: // ORA H
+            ora(cpu, &(cpu->h));
+            break;
+        case 0xB5: // ORA L
+            ora(cpu, &(cpu->l));
+            break;
+        case 0xB6: // ORA M
+            ora(cpu, &(cpu->memory[MERGE_16BIT(cpu->h, cpu->l)]));
+            break;
+        case 0xB7: // ORA A
+            cpu->flags.c = 0;
+            break;
+        case 0xB8: // CMP B
+            cmp(cpu, &(cpu->b));
+            break;
+        case 0xB9: // CMP C
+            cmp(cpu, &(cpu->c));
+            break;
+        case 0xBA: // CMP D
+            cmp(cpu, &(cpu->d));
+            break;
+        case 0xBB: // CMP E
+            cmp(cpu, &(cpu->e));
+            break;
+        case 0xBC: // CMP H
+            cmp(cpu, &(cpu->h));
+            break;
+        case 0xBD: // CMP L
+            cmp(cpu, &(cpu->l));
+            break;
+        case 0xBE: // CMP M
+            cmp(cpu, &(cpu->memory[MERGE_16BIT(cpu->h, cpu->l)]));
+            break;
+        case 0xBF: // CMP A
+            cmp(cpu, &(cpu->a));
+            break;
+        case 0xC0: // RNZ
+            if(!cpu->flags.z)
+                ret(cpu);
+            break;
+        case 0xC1: // POP BC
+            pop(cpu, &(cpu->b), &(cpu->c));
+            break;
+        case 0xC2: // JNZ
+            if(!cpu->flags.z){
+                jmp(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xC3: // JMP
+            jmp(cpu, MERGE_16BIT(d16_h, d16_l));
+            cpu->pc += 2;
+            break;
+        case 0xC4: // CNZ
+            if(!cpu->flags.z){
+                call(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xC5: // PUSH BC
+            push(cpu, &(cpu->b), &(cpu->c));
+            break;
+        case 0xC6: // ADI D8
+            {
+                uint16_t result = cpu->a + d16_l;
+                check_flags(cpu, result, FLAG_ALL);
+                cpu->a = result & 0xff;
+                cpu->pc++;
+                break;
+            }
+        case 0xC7: // RST 0
+            not_implemented(*op);
+            break;
+        case 0xC8: // RZ
+            if(cpu->flags.z)
+                ret(cpu);
+            break;
+        case 0xC9: // RET
+            ret(cpu);
+            break;
+        case 0xCA: // JZ adr
+            if(cpu->flags.z){
+                jmp(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xCB: // NOP
+            break;
+        case 0xCC: // CZ addr
+            if(cpu->flags.c){
+                call(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xCD: // CALL addr
+            call(cpu, MERGE_16BIT(d16_h, d16_l));
+            break;
+        case 0xCE: // ACI D8
+            {
+                uint16_t result = cpu->a + d16_l + cpu->flags.c;
+                check_flags(cpu, result, FLAG_ALL);
+                cpu->a = result & 0xff;
+                cpu->pc++;
+                break;
+            }
+        case 0xCF: // RST 1
+            not_implemented(*op);
+            break;
+        case 0xD0: // RNC
+            if(!cpu->flags.c)
+                ret(cpu);
+            break;
+        case 0xD1: // POP DE
+            pop(cpu, &(cpu->d), &(cpu->e));
+            break;
+        case 0xD2: // JNC adr
+            if(!cpu->flags.c){
+                jmp(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xD3: // OUT D8
+            not_implemented(*op);
+            break;
+        case 0xD4: // CNC addr
+            if(!cpu->flags.c){
+                call(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xD5: // PUSH DE
+            push(cpu, &(cpu->d), &(cpu->e));
+            break;
+        case 0xD6: // SUI D8
+            {
+                uint16_t result = cpu->a - d16_l;
+                check_flags(cpu, result, FLAG_ALL);
+                cpu->a = result & 0xff;
+                cpu->pc++;
+                break;
+            }
+        case 0xD7: // RST 2
+            not_implemented(*op);
+            break;
+        case 0xD8: // RC
+            if(cpu->flags.c)
+                ret(cpu);
+            break;
+        case 0xD9: // NOP
+            break;
+        case 0xDA: // JC addr
+            if(cpu->flags.c){
+                jmp(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xDB: // IN D8
+            not_implemented(*op)
+            cpu->pc++;
+            break;
+        case 0xDC: // CC addr
+            if(cpu->flags.c){
+                call(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xDD: // NOP
+            break;
+        case 0xDE: // SBI D8
+            {
+                uint16_t result = cpu->a - d16_l - cpu->flags.c;
+                check_flags(cpu, result, FLAG_ALL);
+                cpu->a = result & 0xff;
+                cpu->pc++;
+                break;
+            }
+            break;
+        case 0xDF: // RST 3
+            not_implemented(*op);
+            break;
+        case 0xE0: // RPO
+            if(!cpu->flags.p)
+                ret(cpu);
+            break;
+        case 0xE1: // POP HL
+            pop(cpu, &(cpu->h), &(cpu->l));
+            break;
+        case 0xE2: // JPO addr
+            if(!cpu->flags.p){
+                jmp(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xE3: // XTHL
+            {
+                uint8_t prev_h = cpu->h;
+                uint8_t prev_l = cpu->l;
+                cpu->l = cpu->memory[cpu->sp];
+                cpu->h = cpu->memory[cpu->sp + 1];
+                cpu->memory[cpu->sp] = prev_l;
+                cpu->memory[cpu->sp + 1] = prev_h;
+            }
+            break;
+        case 0xE4: // CPO addr
+            if(!cpu->flags.p){
+                call(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc +=2;
+            }
+            break;
+        case 0xE5: // PUSH H
+            push(cpu, &(cpu->h), &(cpu->l));
+            break;
+        case 0xE6: // ANI D8
+            {
+                uint16_t result = cpu->a & d16_l;
+                check_flags(cpu, result, FLAG_ALL);
+                cpu->a = result & 0xff;
+                cpu->pc++;
+                break;
+            }
+            break;
+        case 0xE7: // RST 4
+            not_implemented(*op);
+            break;
+        case 0xE8: // RPE
+            if(cpu->flags.p)
+                ret(cpu);
+            break;
+        case 0xE9: // PCHL
+            cpu->pc = MERGE_16BIT(d16_h, d16_l);
+            break;
+        case 0xEA: // JPE addr
+            if(cpu->flags.p){
+                jmp(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xEB: // XCHG
+            {
+                uint8_t prev_d = cpu->d;
+                uint8_t prev_e = cpu->e;
+                cpu->d = cpu->memory[cpu->sp];
+                cpu->e = cpu->memory[cpu->sp + 1];
+                cpu->memory[cpu->sp] = prev_d;
+                cpu->memory[cpu->sp + 1] = prev_e;
+            }
+            break;
+        case 0xEC: // CPE addr
+            if(cpu->flags.p){
+                call(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xED: // NOP
+            break;
+        case 0xEE: // XRI D8
+            {
+                uint16_t result = cpu->a ^ d16_l;
+                check_flags(cpu, result, FLAG_ALL);
+                cpu->a = result & 0xff;
+                cpu->pc++;
+                break;
+            }
+            break;
+        case 0xEF: // RST 4
+            not_implemented(*op);
+            break;
+        case 0xF0: // RPE
+            if(cpu->flags.p)
+                ret(cpu);
+            break;
+        case 0xF1: // POP PSW
+            not_implemented(*op);
+            break;
+        case 0xF2: // JP addr
+            if(cpu->flags.p){
+                jmp(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xF3: // DI
+            not_implemented(*op);
+            break;
+        case 0xF4: // CP addr
+            if(cpu->flags.p){
+                call(cpu, MERGE_16BIT(d16_h, d16_l));
+            }else{
+                cpu->pc += 2;
+            }
+            break;
+        case 0xF5: // PUSH PSW
+            not_implemented(*op);
+            break;
         case 0xF6:
+            break;
         case 0xF7:
+            break;
         case 0xF8:
+            break;
         case 0xF9:
+            break;
         case 0xFA:
+            break;
         case 0xFB:
+            break;
         case 0xFC:
+            break;
         case 0xFD:
+            break;
         case 0xFE:
+            break;
         case 0xFF:
-        default: break;
+            break;
+        default: 
+            break;
     }
-
-    //Increment Program Counter
-    cpu->pc += pc_inc;
 
     return I8080_OK;
 }

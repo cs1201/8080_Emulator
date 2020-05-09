@@ -14,6 +14,7 @@ enum{
     FLAG_S =  0x4,
     FLAG_P =  0x8,
     FLAG_Z =  0x10,
+    FLAG_ALL = 0xff
 };
 
 /* Bitfield struct to represent CPU condition bits */
@@ -25,7 +26,6 @@ typedef struct i8080_flags_t{
     uint8_t z:1;    //Zero
     uint8_t  :3;    //--- Padding to 8-bits ---
 }i8080_flags_t;
-
 
 /* High-level CPU state struct */
 typedef struct i8080_state_t{
@@ -58,7 +58,7 @@ void check_flags(i8080_state_t *cpu, uint16_t result, uint8_t mask);
 void display_flags(i8080_state_t *cpu);
 void clear_flags(i8080_state_t *cpu);
 
-/* Generic CPU Instruction helper functions */
+/* Generic CPU Instruction functions */
 void inr(i8080_state_t *cpu, uint8_t *reg);
 void inx(uint8_t *reg_hi, uint8_t *reg_lo);
 void dcr(i8080_state_t *cpu, uint8_t *reg);
@@ -71,7 +71,13 @@ void sub(i8080_state_t *cpu, uint8_t *reg);
 void sbb(i8080_state_t *cpu, uint8_t *reg);
 void ana(i8080_state_t *cpu, uint8_t *reg);
 void xra(i8080_state_t *cpu, uint8_t *reg);
-void ora(i8080_state_t *cpu, uint8_t *reg)
+void ora(i8080_state_t *cpu, uint8_t *reg);
+void cmp(i8080_state_t *cpu, uint8_t *reg);
+void ret(i8080_state_t *cpu);
+void pop(i8080_state_t *cpu, uint8_t *reg_hi, uint8_t *reg_lo);
+void jmp(i8080_state_t *cpu, uint16_t addr);
+void call(i8080_state_t *cpu, uint16_t addr);
+void push(i8080_state_t *cpu, uint8_t *reg_hi, uint8_t *reg_lo);
 
 void not_implemented(uint8_t op);
 
